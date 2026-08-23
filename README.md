@@ -1,2 +1,2 @@
-# Overcurrent-Relay-with-Very-Inverse-Type
-Arduino-Based Overcurrent Relay Design with Very Inverse Type
+# Inverse-Time-Overcurrent-Relay
+# Microcontroller-based overcurrent protection relay using Arduino and PZEM-004T
