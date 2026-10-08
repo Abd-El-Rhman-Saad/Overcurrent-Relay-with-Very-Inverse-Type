@@ -1,0 +1,460 @@
+\documentclass[12pt, a4paper]{article}
+
+% ------------------------------------------------------------------
+% Microcontroller-Based Overcurrent Relay (IEC Very Inverse)
+% Report source -- every statement matches Code/Protection_Proj.ino
+% ------------------------------------------------------------------
+
+\usepackage[utf8]{inputenc}
+
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage[expansion=false]{microtype}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.16}
+
+\sisetup{detect-all, per-mode=symbol}
+
+% Page geometry and images
+\geometry{top=1in, bottom=1in, left=1in, right=1in}
+\graphicspath{{Images/}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+% Header / footer
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Abd El-Rhman Muhammad Saad -- 19017058}
+\rhead{Microcontroller-Based Overcurrent Relay}
+\cfoot{\thepage}
+
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+
+% Code listing style
+\lstset{
+  language=C++,
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{green!40!black},
+  numbers=left, numberstyle=\tiny\color{gray}, numbersep=6pt,
+  frame=single, breaklines=true, showstringspaces=false,
+  xleftmargin=1.5em, framexleftmargin=1.5em
+}
+
+% Diagram styles
+\tikzset{
+  blk/.style={draw, rounded corners=2pt, minimum width=2.9cm, minimum height=1.0cm,
+              align=center, font=\small, fill=blue!6},
+  pwr/.style={draw, rounded corners=2pt, minimum width=2.9cm, minimum height=1.0cm,
+              align=center, font=\small, fill=orange!12},
+  dec/.style={draw, diamond, aspect=2.6, inner sep=1pt, align=center, font=\footnotesize, fill=yellow!15},
+  proc/.style={draw, rounded corners=2pt, minimum width=4.6cm, minimum height=0.8cm,
+               align=center, font=\footnotesize, fill=blue!6},
+  term/.style={draw, rounded corners=8pt, minimum width=3.2cm, minimum height=0.7cm,
+               align=center, font=\footnotesize, fill=green!10},
+  arr/.style={-{Stealth[length=2.2mm]}, thick},
+  pwrarr/.style={-{Stealth[length=2.2mm]}, thick, color=red!70!black},
+}
+
+\begin{document}
+
+% ---------------------------- TITLE PAGE ----------------------------
+\begin{titlepage}
+  \begin{flushleft}
+    \begin{minipage}{0.15\textwidth}
+      \includegraphics[width=\textwidth]{logo.png}
+    \end{minipage}%
+    \hspace{0.3cm}
+    \begin{minipage}{0.7\textwidth}
+      {\scshape\large Alexandria University} \\[0.1cm]
+      {\scshape\normalsize Faculty of Engineering} \\[0.1cm]
+      {\scshape\normalsize Electrical Power and Machines Engineering Department}
+    \end{minipage}
+  \end{flushleft}
+
+  \vspace{2.0cm}
+  \centering
+  {\Huge\bfseries Power System Protection \par}
+  \vspace{0.4cm}
+  {\Large\bfseries Microcontroller-Based Overcurrent Relay:\\ IEC Very Inverse Time Characteristic \par}
+
+  \vspace{1.0cm}
+  {\Large\itshape Prepared by:\par}
+  \vspace{0.2cm}
+  {\Large \textbf{Abd El-Rhman Muhammad Saad Muhammad}\par}
+  {\large \textbf{ID:} 19017058\par}
+
+  \vfill
+ {\large \textbf{Project Repository:}\par}
+ {\normalsize \href{https://github.com/Abd-El-Rhman-Saad/Overcurrent-Relay-with-Very-Inverse-Type.git}{Click here to access the Simulink Model on GitHub}}\par
+
+  \vfill
+  {\large \textbf{Date:} May 2026 \par}
+\end{titlepage}
+
+% ------------------------------ ABSTRACT -----------------------------
+\begin{abstract}
+This report presents the design and implementation of a digital overcurrent relay that follows the IEC Very Inverse time--current characteristic. An Arduino Uno measures the load current through a ZMCT103C current transformer module, estimates its RMS value, and compares it with a pickup setting $I_s$. When the current exceeds $I_s$, the relay calculates the required operating time from the Time Multiplier Setting ($TMS$) and trips a relay module once the fault has lasted long enough; short disturbances that clear earlier do not cause a trip. Measurements, trip time and status are shown on an I2C LCD, two LEDs indicate the relay state, and a push button resets the relay after a trip. The prototype is rated for a 12\,V AC / 1\,A test bench. The report describes the hardware, the signal-processing method, the trip algorithm, the expected time--current behavior, and the limitations of the prototype together with possible improvements.
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ============================ 1. INTRODUCTION ============================
+\section{Introduction and Theoretical Background}
+Overcurrent protection is the most widely used form of protection in radial distribution systems. An overcurrent relay operates when the measured current exceeds a pickup value $I_s$. To obtain selectivity between a relay and the backup relay upstream of it, \emph{inverse definite minimum time} (IDMT) characteristics are used: the larger the current, the shorter the operating time.
+
+\subsection{IEC Inverse-Time Characteristics}
+The IEC 60255-151 standard \cite{iec60255} defines the operating time of an inverse-time relay as
+\begin{equation}
+  t = TMS \cdot \frac{\beta}{\left(\dfrac{I}{I_s}\right)^{\alpha} - 1},
+  \label{eq:iec}
+\end{equation}
+where $t$ is the operating time in seconds, $I$ the measured current, $I_s$ the pickup current, $TMS$ the time multiplier setting that shifts the curve vertically, and $\alpha,\beta$ the constants of the chosen curve. The ratio $PSM = I/I_s$ is called the plug setting multiplier.
+
+\begin{table}[H]
+  \centering
+  \caption{Standard IEC curve constants.}
+  \begin{tabular}{lcc}
+    \toprule
+    Characteristic & $\beta$ & $\alpha$ \\
+    \midrule
+    Standard (normal) inverse & 0.14 & 0.02 \\
+    \textbf{Very inverse} (implemented) & \textbf{13.5} & \textbf{1} \\
+    Extremely inverse & 80 & 2 \\
+    Long-time inverse & 120 & 1 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The \textbf{Very Inverse} curve ($\alpha = 1$, $\beta = 13.5$) is steeper than the standard inverse curve. It is suitable where the fault current falls rapidly with the distance from the source, because relays closer to the source can be given clearly longer operating times than those at the end of the feeder.
+
+\subsection{Project Objectives}
+\begin{itemize}[nosep]
+  \item Measure a 50\,Hz AC load current with a ZMCT103C and an Arduino ADC.
+  \item Implement Eq.~\eqref{eq:iec} with $\alpha = 1$, $\beta = 13.5$ in embedded C/C++.
+  \item Trip a relay module after the calculated delay, ignoring disturbances that clear before the delay has elapsed.
+  \item Provide local indication (LCD and LEDs) and a manual reset.
+\end{itemize}
+
+\newpage
+
+% ============================ 2. HARDWARE ============================
+\section{Hardware System}
+The prototype is built from low-cost, commercially available modules (Figure~\ref{fig:components}) and tested on a 12\,V AC / 1\,A bench.
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}{0.31\textwidth}
+    \centering
+    \includegraphics[height=3.0cm]{Arduino.jpg}
+    \caption{Arduino Uno}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.31\textwidth}
+    \centering
+    \includegraphics[height=3.0cm]{ZMCT103C.jpg}
+    \caption{ZMCT103C module}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.31\textwidth}
+    \centering
+    \includegraphics[height=3.0cm]{Relay.jpg}
+    \caption{1-channel relay module}
+  \end{subfigure}
+
+  \vspace{0.4cm}
+  \begin{subfigure}{0.31\textwidth}
+    \centering
+    \includegraphics[height=3.0cm]{LCD.jpg}
+    \caption{16$\times$2 I2C LCD}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.31\textwidth}
+    \centering
+    \includegraphics[height=3.0cm]{Transformer.jpg}
+    \caption{Step-down transformer}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{0.31\textwidth}
+    \centering
+    \includegraphics[height=3.0cm]{Resistors.jpg}
+    \caption{Wire-wound resistor}
+  \end{subfigure}
+  \caption{Main components of the prototype (product images shown for illustration).}
+  \label{fig:components}
+\end{figure}
+
+\begin{itemize}
+  \item \textbf{Arduino Uno:} samples the sensor signal, evaluates Eq.~\eqref{eq:iec}, and controls the outputs.
+  \item \textbf{ZMCT103C current transformer module:} galvanically isolates the measurement from the load circuit and delivers a small AC voltage proportional to the load current; the module output is biased around mid-supply so that the 0--5\,V Arduino ADC can read both half-cycles.
+  \item \textbf{1-channel 5\,V relay module:} its contact is connected in series with the load and opens the circuit when the relay trips. The module used is \emph{active-low}: the Arduino drives the input pin HIGH in normal operation and LOW to trip.
+  \item \textbf{16$\times$2 I2C LCD (address 0x27):} shows the measured current, the calculated trip time and the relay status.
+  \item \textbf{Green and red LEDs:} green = normal, red = tripped.
+  \item \textbf{Reset push button:} restores normal operation after a trip.
+  \item \textbf{Step-down transformer and wire-wound resistors:} supply the 12\,V AC test circuit and provide the adjustable load used to create overload conditions.
+\end{itemize}
+
+\subsection{Pin Assignment}
+\begin{table}[H]
+  \centering
+  \caption{Arduino Uno connections.}
+  \begin{tabular}{lll}
+    \toprule
+    Pin & Function & Direction \\
+    \midrule
+    A0 & ZMCT103C output (analog) & Input \\
+    D8 & Relay module input (LOW = trip) & Output \\
+    D7 & Green LED (normal) & Output \\
+    D6 & Red LED (tripped) & Output \\
+    D2 & Reset push button (\texttt{INPUT\_PULLUP}, pressed = LOW) & Input \\
+    A4/A5 & I2C LCD (SDA/SCL) & Bus \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{System Block Diagram}
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[node distance=0.9cm and 1.3cm]
+    % power path (top row)
+    \node[pwr] (src) {12\,V AC\\ transformer};
+    \node[pwr, right=of src] (ct) {ZMCT103C\\ (in series)};
+    \node[pwr, right=of ct] (rel) {Relay contact\\ (N.C.)};
+    \node[pwr, right=of rel] (load) {Resistive\\ load};
+    \draw[pwrarr] (src) -- (ct);
+    \draw[pwrarr] (ct) -- (rel);
+    \draw[pwrarr] (rel) -- (load);
+    % control row
+    \node[blk, below=1.9cm of ct, minimum width=3.6cm, minimum height=1.5cm] (mcu) {Arduino Uno\\ ADC A0 $\cdot$ I2C\\ D2 $\cdot$ D6 $\cdot$ D7 $\cdot$ D8};
+    \node[blk, left=of mcu] (btn) {Reset\\ button};
+    \node[blk, below=0.8cm of mcu] (lcd) {I2C LCD\\ + LEDs};
+    \node[blk, right=of mcu] (rm) {Relay module\\ coil (D8)};
+    \draw[arr] (ct.south) -- node[right, font=\scriptsize]{A0} (mcu.north);
+    \draw[arr] (btn) -- node[above, font=\scriptsize]{D2} (mcu);
+    \draw[arr] (mcu) -- node[right, font=\scriptsize]{I2C, D6/D7} (lcd);
+    \draw[arr] (mcu) -- node[above, font=\scriptsize]{D8} (rm);
+    \draw[arr, dashed] (rm.north) -- node[right, font=\scriptsize, align=left]{opens} (rel.south);
+  \end{tikzpicture}
+  \caption{Block diagram: red arrows = load current path, black arrows = control and signal paths.}
+  \label{fig:block}
+\end{figure}
+
+\newpage
+
+% ============================ 3. METHOD ============================
+\section{Signal Processing and Trip Algorithm}
+
+\subsection{Current Measurement}
+The Arduino reads the ZMCT103C output with its 10-bit ADC (0--1023 counts for 0--5\,V). In each measurement:
+\begin{enumerate}[nosep]
+  \item The ADC is sampled continuously for a window of \SI{40}{ms}, which is two cycles of the 50\,Hz waveform.
+  \item The maximum and minimum readings in the window are recorded.
+  \item The peak-to-peak voltage is $V_{pp} = \dfrac{ADC_{max} - ADC_{min}}{1023}\times 5\,\mathrm{V}$.
+  \item For a sinusoid, $V_{rms} = \dfrac{V_{pp}/2}{\sqrt{2}} = \dfrac{V_{pp}}{2.8284}$.
+  \item The current is $I = K\,V_{rms}$ with the calibration factor $K = 5.0\,\mathrm{A/V}$, determined against the test bench. Values below \SI{0.08}{A} are treated as zero (noise dead-band).
+\end{enumerate}
+Because the DC bias cancels in $ADC_{max} - ADC_{min}$, no offset removal is needed. Using the maximum and minimum is fast and needs no multiplication per sample, but it is an RMS \emph{estimate} that is exact only for a sinusoidal current; distorted waveforms introduce an error (see Section~\ref{sec:limits}).
+
+One ADC count of peak-to-peak swing corresponds to $\dfrac{5/1023}{2.8284}\times 5 \approx \SI{8.6}{mA}$, which is the resolution of the current measurement.
+
+\subsection{Inverse-Time Logic}
+After each measurement the relay executes the following steps (see also Figure~\ref{fig:flow}):
+\begin{enumerate}[nosep]
+  \item If $I \le I_s$: the fault timer is cleared and the LCD shows \texttt{Status: NORMAL}.
+  \item If $I > I_s$: when the condition first appears, the start time of the fault is stored. The trip time $t$ of Eq.~\eqref{eq:iec} is calculated for the present current and shown on the LCD.
+  \item If the time elapsed since the start of the fault is greater than or equal to $t$, the relay trips.
+\end{enumerate}
+If the current drops back to $I_s$ or below before $t$ has elapsed, the fault is considered transient and the timer restarts at the next pickup. This prevents nuisance trips on short overloads such as motor-starting inrush.
+
+\textbf{Trip action.} On a trip the Arduino drives the relay input LOW (opening the load circuit), turns the green LED off and the red LED on, and shows \texttt{SYSTEM TRIPPED! Press to Reset}. The relay stays latched, and the measurement stops, until the reset button is pressed.
+
+\textbf{Default settings.} $I_s = \SI{0.4}{A}$, $TMS = 0.05$, $\alpha = 1$, $\beta = 13.5$ (chosen for the 12\,V AC / 1\,A bench). Substituting in Eq.~\eqref{eq:iec} gives
+\begin{equation}
+  t = \frac{13.5 \times 0.05}{I/0.4 - 1} = \frac{0.675}{I/0.4 - 1}\ \text{s}.
+\end{equation}
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \node[term] (start) at (0,0) {Start: relay HIGH,\\ green LED on};
+    \node[dec]  (trp)   at (0,-1.6) {Tripped?};
+    \node[proc] (meas)  at (0,-3.4) {Measure $I$ (40\,ms window)\\ and show it on the LCD};
+    \node[dec]  (pick)  at (0,-5.0) {$I > I_s$?};
+    \node[proc] (calc)  at (0,-6.8) {Start fault timer (first time)\\ $t = 13.5\,TMS/(I/I_s-1)$};
+    \node[dec]  (el)    at (0,-8.4) {Elapsed $\ge t$?};
+    \node[proc] (tripa) at (0,-10.1) {Trip: relay LOW, red LED on,\\ show ``SYSTEM TRIPPED''};
+    \node[dec]  (rst)   at (5.0,-1.6) {Reset\\ pressed?};
+    \node[proc, minimum width=3.6cm] (rs)   at (5.0,-3.4) {Relay HIGH, green LED on,\\ clear flags};
+    \node[proc, minimum width=3.6cm] (norm) at (5.0,-5.0) {Clear fault timer,\\ show ``NORMAL''};
+    \coordinate (busTop) at (8.6,-0.8);
+
+    \draw[arr] (start) -- (trp);
+    \draw[arr] (trp) -- node[left,font=\scriptsize]{no} (meas);
+    \draw[arr] (trp) -- node[above,font=\scriptsize]{yes} (rst);
+    \draw[arr] (rst) -- node[right,font=\scriptsize]{yes} (rs);
+    \draw[arr] (meas) -- (pick);
+    \draw[arr] (pick) -- node[left,font=\scriptsize]{yes} (calc);
+    \draw[arr] (pick) -- node[above,font=\scriptsize]{no} (norm);
+    \draw[arr] (calc) -- (el);
+    \draw[arr] (el) -- node[left,font=\scriptsize]{yes} (tripa);
+    % loop-back bus on the right
+    \draw (rst.east) -- node[above,font=\scriptsize,pos=0.35]{no} (rst.east -| busTop);
+    \draw (rs.east) -- (rs.east -| busTop);
+    \draw (norm.east) -- (norm.east -| busTop);
+    \draw (el.east) -- node[above,font=\scriptsize,pos=0.3]{no} (el.east -| busTop);
+    \draw (tripa.east) -- (tripa.east -| busTop);
+    \draw[arr] (tripa.east -| busTop) -- (busTop) -- (busTop -| trp) -- (trp.north);
+  \end{tikzpicture}
+  \caption{Flowchart of the relay program (one pass of the main loop; the loop repeats continuously, with a 50\,ms pause at the end of each pass).}
+  \label{fig:flow}
+\end{figure}
+
+\subsection{Program Excerpts}
+The two functions that implement the measurement and the trip decision (full code: \texttt{Code/Protection\_Proj.ino}):
+\begin{lstlisting}
+float readACCurrent() {
+  uint32_t samplePeriod = 40;          // 2 cycles at 50 Hz
+  uint32_t t_start = millis();
+  int max_val = 0, min_val = 1023;
+  while (millis() - t_start < samplePeriod) {
+    int adc_val = analogRead(SENSOR_PIN);
+    if (adc_val > max_val) max_val = adc_val;
+    if (adc_val < min_val) min_val = adc_val;
+  }
+  float v_swing = ((max_val - min_val) / 1023.0) * 5.0;
+  float v_rms   = v_swing / 2.8284;
+  float current = v_rms * CALIBRATION_FACTOR;   // 5.0
+  if (current < 0.08) current = 0.0;
+  return current;
+}
+\end{lstlisting}
+
+\newpage
+
+\begin{lstlisting}
+if (current > Is) {
+  if (!faultActive) { faultActive = true; faultStartTime = millis(); }
+  float tripTimeSeconds = (BETA * TMS) / (pow((current / Is), ALPHA) - 1.0);
+  unsigned long tripTimeMillis = tripTimeSeconds * 1000;
+  if ((millis() - faultStartTime) >= tripTimeMillis) triggerRelay();
+} else {
+  faultActive = false;
+}
+\end{lstlisting}
+
+% ============================ 4. RESULTS ============================
+\section{Expected Time--Current Behavior}
+\subsection{Theoretical Characteristic}
+Figure~\ref{fig:curve} plots Eq.~\eqref{eq:iec} for the implemented curve ($\alpha=1$, $\beta=13.5$) for three $TMS$ values; the default setting is $TMS = 0.05$. The time falls steeply just above the pickup value and flattens at high multiples, so mild overloads are tolerated for seconds while severe faults are cleared quickly.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=0.88\textwidth, height=7.2cm,
+      xmode=log, ymode=log,
+      xmin=1.1, xmax=20, ymin=0.02, ymax=30,
+      xlabel={Plug setting multiplier $I/I_s$},
+      ylabel={Operating time $t$ (s)},
+      grid=both, grid style={gray!25},
+      legend pos=north east, legend cell align=left,
+      xtick={1.1,1.5,2,3,5,10,20},
+      xticklabels={1.1,1.5,2,3,5,10,20},
+      domain=1.1:20, samples=80, thick
+    ]
+      \addplot[blue]  {13.5*0.05/(x-1)};
+      \addplot[red]   {13.5*0.10/(x-1)};
+      \addplot[green!50!black] {13.5*0.20/(x-1)};
+      \legend{$TMS=0.05$ (default), $TMS=0.10$, $TMS=0.20$}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{IEC Very Inverse characteristic implemented by the relay (calculated from Eq.~\eqref{eq:iec}).}
+  \label{fig:curve}
+\end{figure}
+
+\newpage
+
+\subsection{Trip Times with the Default Settings}
+For the 1\,A bench the load current can reach about $PSM = 2.5$ with $I_s = \SI{0.4}{A}$. Table~\ref{tab:times} lists the calculated operating times in this range.
+
+\begin{table}[H]
+  \centering
+  \caption{Calculated operating time for $I_s = 0.4$\,A and $TMS = 0.05$.}
+  \label{tab:times}
+  \begin{tabular}{ccc}
+    \toprule
+    Load current (A) & $I/I_s$ & Operating time (s) \\
+    \midrule
+    0.5 & 1.25 & 2.70 \\
+    0.6 & 1.50 & 1.35 \\
+    0.7 & 1.75 & 0.90 \\
+    0.8 & 2.00 & 0.675 \\
+    0.9 & 2.25 & 0.54 \\
+    1.0 & 2.50 & 0.45 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Timing Accuracy of the Program}
+One pass of the main loop takes at least $\SI{40}{ms}$ (measurement) plus $\SI{50}{ms}$ (pause), and the LCD updates add a few more milliseconds. The elapsed time is therefore checked about every \SI{0.1}{s}, so the trip is delayed by up to roughly one loop period beyond the calculated time. This is negligible for the operating times in Table~\ref{tab:times} (0.45--2.7\,s) but would matter for the very short times produced at high multiples of $I_s$.
+
+\subsection{Test Procedure}
+The relay is verified on the bench in the following way:
+\begin{enumerate}[nosep]
+  \item Set the load with the wire-wound resistors so that the current is below $I_s$; the LCD must show \texttt{Status: NORMAL} and the green LED must stay on.
+  \item Increase the load to a chosen current above $I_s$ (for example 0.6, 0.8 and 1.0\,A) and measure the time from the moment of the overload to the opening of the relay contact with a stopwatch or by recording the LCD/serial output; compare it with Table~\ref{tab:times}.
+  \item Apply a short overload that is removed before the calculated time; the relay must not trip.
+  \item After a trip, press the reset button; the relay must close and the green LED must light.
+\end{enumerate}
+% --- Optional: add your measured results here after the bench test ---
+% \begin{table}[H]
+%   \centering
+%   \caption{Measured versus calculated operating time.}
+%   \begin{tabular}{cccc}
+%     \toprule
+%     $I$ (A) & $I/I_s$ & Calculated (s) & Measured (s) \\
+%     \midrule
+%     0.6 & 1.50 & 1.35 & \ldots \\
+%     0.8 & 2.00 & 0.675 & \ldots \\
+%     1.0 & 2.50 & 0.45 & \ldots \\
+%     \bottomrule
+%   \end{tabular}
+% \end{table}
+
+% ============================ 5. LIMITATIONS ============================
+\section{Limitations and Possible Improvements}
+\label{sec:limits}
+\begin{itemize}
+  \item \textbf{RMS estimation:} the peak-to-peak method is accurate only for sinusoidal currents. A true RMS calculation (sampling the waveform, removing the DC offset, squaring, averaging over whole cycles and taking the square root) would be more accurate for distorted currents.
+  \item \textbf{Time integration:} the relay compares the elapsed time with the trip time recomputed for the present current. A numerical relay normally integrates the ratio $\Delta t / t(I)$ over time, which handles a changing fault current more accurately.
+  \item \textbf{Timing resolution:} the loop period of about 0.1\,s limits the accuracy at high multiples of $I_s$; a hardware timer or interrupt-driven sampling would give finer timing.
+  \item \textbf{Fixed settings:} $I_s$ and $TMS$ are constants in the code. Push buttons and EEPROM storage would allow field adjustment.
+  \item \textbf{Scope:} the prototype protects a single-phase, low-voltage bench circuit. It has no instantaneous (high-set) element, no earth-fault element, and it is an educational model, not a certified protection device.
+  \item \textbf{Other characteristics:} the constants $\alpha,\beta$ can be replaced with those of Table~1 to implement the standard, extremely or long-time inverse curves.
+\end{itemize}
+
+% ============================ 6. CONCLUSION ============================
+\section{Conclusion}
+A microcontroller-based overcurrent relay with the IEC Very Inverse characteristic was designed and built using an Arduino Uno, a ZMCT103C current transformer module and a relay module. The relay estimates the load current, calculates the operating time from $I_s$ and $TMS$, trips and latches when a fault lasts long enough, ignores disturbances that clear earlier, and provides local indication and a manual reset. The report documented the hardware connections, the measurement method with its resolution, the trip algorithm, the expected time--current behavior, and the main limitations. The project connects the theory of inverse-time protection with a low-cost embedded implementation and gives a base for extensions such as true RMS measurement, integrated timing and adjustable settings.
+
+% ============================ REFERENCES ============================
+\begin{thebibliography}{9}
+\bibitem{iec60255} IEC 60255-151, \emph{Measuring relays and protection equipment -- Part 151: Functional requirements for over/under current protection}, International Electrotechnical Commission.
+\bibitem{arduino} Arduino documentation, \emph{analogRead()} and \emph{millis()}, \url{https://www.arduino.cc/reference/en/}.
+\end{thebibliography}
+
+\end{document}
